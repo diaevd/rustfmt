@@ -370,6 +370,10 @@ impl Rewrite for ast::WherePredicate {
                                      .intersperse(Some(", ".to_string()))
                                      .collect());
 
+                    let joiner = match context.config.type_punctuation_density {
+                        TypeDensity::Compressed => "+",
+                        TypeDensity::Wide => " + ",
+                    };
                     // 6 = "for<> ".len()
                     let used_width = lifetime_str.len() + type_str.len() + colon.len() + 6;
                     let budget = try_opt!(shape.width.checked_sub(used_width));
@@ -379,7 +383,7 @@ impl Rewrite for ast::WherePredicate {
                                                                          Shape::legacy(budget,
                                                                          shape.indent + used_width))
                                                     })
-                                                    .intersperse(Some(" + ".to_string()))
+                                                    .intersperse(Some(joiner.to_string()))
                                                     .collect());
 
                     if context.config.spaces_within_angle_brackets && lifetime_str.len() > 0 {
@@ -392,6 +396,10 @@ impl Rewrite for ast::WherePredicate {
                         format!("for<{}> {}{}{}", lifetime_str, type_str, colon, bounds_str)
                     }
                 } else {
+                    let joiner = match context.config.type_punctuation_density {
+                        TypeDensity::Compressed => "+",
+                        TypeDensity::Wide => " + ",
+                    };
                     let used_width = type_str.len() + colon.len();
                     let budget = try_opt!(shape.width.checked_sub(used_width));
                     let bounds_str: String = try_opt!(bounds.iter()
@@ -400,7 +408,7 @@ impl Rewrite for ast::WherePredicate {
                                                                          Shape::legacy(budget,
                                                                          shape.indent + used_width))
                                                     })
-                                                    .intersperse(Some(" + ".to_string()))
+                                                    .intersperse(Some(joiner.to_string()))
                                                     .collect());
 
                     format!("{}{}{}", type_str, colon, bounds_str)
@@ -456,7 +464,11 @@ fn rewrite_bounded_lifetime<'b, I>(lt: &ast::Lifetime,
                                             .map(|b| b.rewrite(context, shape))
                                             .collect());
         let colon = type_bound_colon(context);
-        let result = format!("{}{}{}", result, colon, appendix.join(" + "));
+        let joiner = match context.config.type_punctuation_density {
+            TypeDensity::Compressed => "+",
+            TypeDensity::Wide => " + ",
+        };
+        let result = format!("{}{}{}", result, colon, appendix.join(joiner));
         wrap_str(result, context.config.max_width, shape)
     }
 }
@@ -509,12 +521,15 @@ impl Rewrite for ast::TyParam {
             if context.config.space_after_bound_colon {
                 result.push_str(" ");
             }
-
+            let joiner = match context.config.type_punctuation_density {
+                TypeDensity::Compressed => "+",
+                TypeDensity::Wide => " + ",
+            };
             let bounds: String =
                 try_opt!(self.bounds
                              .iter()
                              .map(|ty_bound| ty_bound.rewrite(context, shape))
-                             .intersperse(Some(" + ".to_string()))
+                             .intersperse(Some(joiner.to_string()))
                              .collect());
 
             result.push_str(&bounds);
@@ -587,31 +602,34 @@ impl Rewrite for ast::Ty {
                 let mut_len = mut_str.len();
                 Some(match *lifetime {
                          Some(ref lifetime) => {
-                    let lt_budget = try_opt!(shape.width.checked_sub(2 + mut_len));
-                    let lt_str = try_opt!(lifetime.rewrite(context,
-                                                           Shape::legacy(lt_budget,
+                             let lt_budget = try_opt!(shape.width.checked_sub(2 + mut_len));
+                             let lt_str = try_opt!(lifetime.rewrite(context,
+                                                                    Shape::legacy(lt_budget,
+                                                                                  shape.indent +
+                                                                                  2 +
+                                                                                  mut_len)));
+                             let lt_len = lt_str.len();
+                             let budget = try_opt!(shape.width.checked_sub(2 + mut_len + lt_len));
+                             format!("&{} {}{}",
+                                     lt_str,
+                                     mut_str,
+                                     try_opt!(mt.ty
+                                                  .rewrite(context,
+                                                           Shape::legacy(budget,
                                                                          shape.indent + 2 +
-                                                                         mut_len)));
-                    let lt_len = lt_str.len();
-                    let budget = try_opt!(shape.width.checked_sub(2 + mut_len + lt_len));
-                    format!("&{} {}{}",
-                            lt_str,
-                            mut_str,
-                            try_opt!(mt.ty
-                                         .rewrite(context,
-                                                  Shape::legacy(budget,
-                                                                shape.indent + 2 + mut_len +
-                                                                lt_len))))
-                }
+                                                                         mut_len +
+                                                                         lt_len))))
+                         }
                          None => {
-                    let budget = try_opt!(shape.width.checked_sub(1 + mut_len));
-                    format!("&{}{}",
-                            mut_str,
-                            try_opt!(mt.ty
-                                         .rewrite(context,
-                                                  Shape::legacy(budget,
-                                                                shape.indent + 1 + mut_len))))
-                }
+                             let budget = try_opt!(shape.width.checked_sub(1 + mut_len));
+                             format!("&{}{}",
+                                     mut_str,
+                                     try_opt!(mt.ty
+                                                  .rewrite(context,
+                                                           Shape::legacy(budget,
+                                                                         shape.indent + 1 +
+                                                                         mut_len))))
+                         }
                      })
             }
             // FIXME: we drop any comments here, even though it's a silly place to put
@@ -686,9 +704,9 @@ fn rewrite_bare_fn(bare_fn: &ast::BareFnTy,
                                       .lifetimes
                                       .iter()
                                       .map(|l| {
-                                               l.rewrite(context,
+            l.rewrite(context,
                       Shape::legacy(try_opt!(shape.width.checked_sub(6)), shape.indent + 4))
-                                           })
+        })
                                       .intersperse(Some(", ".to_string()))
                                       .collect::<Option<String>>()));
         result.push_str("> ");

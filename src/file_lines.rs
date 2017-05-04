@@ -14,12 +14,12 @@ use std::{cmp, iter, path, str};
 
 use itertools::Itertools;
 use multimap::MultiMap;
-use rustc_serialize::{self, json};
+use serde_json as json;
 
 use codemap::LineRange;
 
 /// A range that is inclusive of both ends.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, RustcDecodable)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize)]
 struct Range {
     pub lo: usize,
     pub hi: usize,
@@ -123,10 +123,8 @@ impl FileLines {
             Some(ref map) => map,
         };
 
-        match canonicalize_path_string(range.file_name()).and_then(|canonical| {
-                                                                       map.get_vec(&canonical)
-                                                                           .ok_or(())
-                                                                   }) {
+        match canonicalize_path_string(range.file_name())
+                  .and_then(|canonical| map.get_vec(&canonical).ok_or(())) {
             Ok(ranges) => ranges.iter().any(|r| r.contains(Range::from(range))),
             Err(_) => false,
         }
@@ -140,10 +138,8 @@ impl FileLines {
             Some(ref map) => map,
         };
 
-        match canonicalize_path_string(range.file_name()).and_then(|canonical| {
-                                                                       map.get_vec(&canonical)
-                                                                           .ok_or(())
-                                                                   }) {
+        match canonicalize_path_string(range.file_name())
+                  .and_then(|canonical| map.get_vec(&canonical).ok_or(())) {
             Ok(ranges) => ranges.iter().any(|r| r.intersects(Range::from(range))),
             Err(_) => false,
         }
@@ -177,14 +173,14 @@ impl str::FromStr for FileLines {
     type Err = String;
 
     fn from_str(s: &str) -> Result<FileLines, String> {
-        let v: Vec<JsonSpan> = try!(json::decode(s).map_err(|e| e.to_string()));
+        let v: Vec<JsonSpan> = try!(json::from_str(s).map_err(|e| e.to_string()));
         let m = try!(v.into_iter().map(JsonSpan::into_tuple).collect());
         Ok(FileLines::from_multimap(m))
     }
 }
 
 // For JSON decoding.
-#[derive(Clone, Debug, RustcDecodable)]
+#[derive(Clone, Debug, Deserialize)]
 struct JsonSpan {
     file: String,
     range: (usize, usize),
@@ -194,17 +190,18 @@ impl JsonSpan {
     // To allow `collect()`ing into a `MultiMap`.
     fn into_tuple(self) -> Result<(String, Range), String> {
         let (lo, hi) = self.range;
-        let canonical = try!(canonicalize_path_string(&self.file).map_err(|_| {
-            format!("Can't canonicalize {}", &self.file)
-        }));
+        let canonical = try!(canonicalize_path_string(&self.file)
+                                 .map_err(|_| format!("Can't canonicalize {}", &self.file)));
         Ok((canonical, Range::new(lo, hi)))
     }
 }
 
 // This impl is needed for inclusion in the `Config` struct. We don't have a toml representation
 // for `FileLines`, so it will just panic instead.
-impl rustc_serialize::Decodable for FileLines {
-    fn decode<D: rustc_serialize::Decoder>(_: &mut D) -> Result<Self, D::Error> {
+impl<'de> ::serde::de::Deserialize<'de> for FileLines {
+    fn deserialize<D>(_: D) -> Result<Self, D::Error>
+        where D: ::serde::de::Deserializer<'de>
+    {
         panic!("FileLines cannot be deserialized from a project rustfmt.toml file: please \
                 specify it via the `--file-lines` option instead");
     }

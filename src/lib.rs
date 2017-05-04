@@ -15,9 +15,13 @@
 #[macro_use]
 extern crate log;
 
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
+
 extern crate syntex_syntax as syntax;
 extern crate syntex_errors as errors;
-extern crate rustc_serialize;
 
 extern crate strings;
 
@@ -158,7 +162,7 @@ impl Indent {
         let (num_tabs, num_spaces) = if config.hard_tabs {
             (self.block_indent / config.tab_spaces, self.alignment)
         } else {
-            (0, self.block_indent + self.alignment)
+            (0, self.width())
         };
         let num_chars = num_tabs + num_spaces;
         let mut indent = String::with_capacity(num_chars);
@@ -262,10 +266,7 @@ impl Shape {
         let alignment = self.offset + extra_width;
         Shape {
             width: self.width,
-            indent: Indent {
-                block_indent: self.indent.block_indent,
-                alignment: alignment,
-            },
+            indent: Indent::new(self.indent.block_indent, alignment),
             offset: alignment,
         }
     }
@@ -274,19 +275,13 @@ impl Shape {
         if self.indent.alignment == 0 {
             Shape {
                 width: self.width,
-                indent: Indent {
-                    block_indent: self.indent.block_indent + extra_width,
-                    alignment: 0,
-                },
+                indent: Indent::new(self.indent.block_indent + extra_width, 0),
                 offset: 0,
             }
         } else {
             Shape {
                 width: self.width,
-                indent: Indent {
-                    block_indent: self.indent.block_indent,
-                    alignment: self.indent.alignment + extra_width,
-                },
+                indent: self.indent + extra_width,
                 offset: self.indent.alignment + extra_width,
             }
         }
@@ -295,10 +290,7 @@ impl Shape {
     pub fn add_offset(&self, extra_width: usize) -> Shape {
         Shape {
             width: self.width,
-            indent: Indent {
-                block_indent: self.indent.block_indent,
-                alignment: self.indent.alignment,
-            },
+            indent: self.indent,
             offset: self.offset + extra_width,
         }
     }
@@ -306,10 +298,7 @@ impl Shape {
     pub fn block(&self) -> Shape {
         Shape {
             width: self.width,
-            indent: Indent {
-                block_indent: self.indent.block_indent,
-                alignment: 0,
-            },
+            indent: self.indent.block_only(),
             offset: self.offset,
         }
     }

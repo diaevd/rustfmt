@@ -210,7 +210,7 @@ impl ConfigHelpItem {
 
 macro_rules! create_config {
     ($($i:ident: $ty:ty, $def:expr, $( $dstring:expr ),+ );+ $(;)*) => (
-        #[derive(RustcDecodable, Clone)]
+        #[derive(Deserialize, Clone)]
         pub struct Config {
             $(pub $i: $ty),+
         }
@@ -220,7 +220,7 @@ macro_rules! create_config {
         // specity all properties of `Config`.
         // We first parse into `ParsedConfig`, then create a default `Config`
         // and overwrite the properties with corresponding values from `ParsedConfig`
-        #[derive(RustcDecodable, Clone)]
+        #[derive(Deserialize, Clone)]
         pub struct ParsedConfig {
             $(pub $i: Option<$ty>),+
         }
@@ -250,10 +250,10 @@ macro_rules! create_config {
                         }
                     }
                 }
-                match toml::decode(parsed) {
-                    Some(parsed_config) =>
+                match parsed.try_into() {
+                    Ok(parsed_config) =>
                         Ok(Config::default().fill_from_parsed_config(parsed_config)),
-                    None => {
+                    Err(_) => {
                         err.push_str("Error: Decoding config file failed. ");
                         err.push_str("Please check your config file.\n");
                         Err(err)
@@ -357,15 +357,14 @@ create_config! {
     type_punctuation_density: TypeDensity, TypeDensity::Wide,
         "Determines if '+' or '=' are wrapped in spaces in the punctuation of types";
     where_style: Style, Style::Default, "Overall strategy for where clauses";
-    // Should we at least try to put the where clause on the same line as the rest of the
+    // TODO:
+    // 1. Should we at least try to put the where clause on the same line as the rest of the
     // function decl?
+    // 2. Currently options `Tall` and `Vertical` produce the same output.
     where_density: Density, Density::CompressedIfEmpty, "Density of a where clause";
-    // Visual will be treated like Tabbed
-    where_indent: IndentStyle, IndentStyle::Block, "Indentation of a where clause";
     where_layout: ListTactic, ListTactic::Vertical, "Element layout inside a where clause";
     where_pred_indent: IndentStyle, IndentStyle::Visual,
         "Indentation style of a where predicate";
-    generics_style: Style, Style::Default, "Overall strategy for generics";
     generics_indent: IndentStyle, IndentStyle::Visual, "Indentation of generics";
     struct_lit_style: IndentStyle, IndentStyle::Block, "Style of struct definition";
     struct_lit_multiline_style: MultilineStyle, MultilineStyle::PreferSingle,

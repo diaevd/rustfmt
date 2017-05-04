@@ -176,9 +176,8 @@ fn format_expr(expr: &ast::Expr,
         ast::ExprKind::Mac(ref mac) => {
             // Failure to rewrite a marco should not imply failure to
             // rewrite the expression.
-            rewrite_macro(mac, None, context, shape, MacroPosition::Expression).or_else(|| {
-                wrap_str(context.snippet(expr.span), context.config.max_width, shape)
-            })
+            rewrite_macro(mac, None, context, shape, MacroPosition::Expression)
+                .or_else(|| wrap_str(context.snippet(expr.span), context.config.max_width, shape))
         }
         ast::ExprKind::Ret(None) => wrap_str("return".to_owned(), context.config.max_width, shape),
         ast::ExprKind::Ret(Some(ref expr)) => {
@@ -578,18 +577,25 @@ fn rewrite_closure(capture: ast::CaptureBy,
                              -> Option<String> {
         // Start with visual indent, then fall back to block indent if the
         // closure is large.
-        let rewrite = try_opt!(block.rewrite(&context, shape));
-
-        let block_threshold = context.config.closure_block_indent_threshold;
-        if block_threshold < 0 || rewrite.matches('\n').count() <= block_threshold as usize {
-            return Some(format!("{} {}", prefix, rewrite));
+        if let Some(block_str) = block.rewrite(&context, shape) {
+            let block_threshold = context.config.closure_block_indent_threshold;
+            if block_threshold < 0 || block_str.matches('\n').count() <= block_threshold as usize {
+                if let Some(block_str) = block_str.rewrite(context, shape) {
+                    return Some(format!("{} {}", prefix, block_str));
+                }
+            }
         }
 
         // The body of the closure is big enough to be block indented, that
         // means we must re-format.
-        let block_shape = shape.block();
-        let rewrite = try_opt!(block.rewrite(&context, block_shape));
-        Some(format!("{} {}", prefix, rewrite))
+        let block_shape = Shape {
+            width: context.config.max_width - shape.block().indent.width(),
+            ..shape.block()
+        };
+        let block_str = try_opt!(block.rewrite(&context, block_shape));
+        Some(format!("{} {}",
+                     prefix,
+                     try_opt!(block_str.rewrite(context, block_shape))))
     }
 }
 
@@ -600,9 +606,7 @@ fn and_one_line(x: Option<String>) -> Option<String> {
 fn nop_block_collapse(block_str: Option<String>, budget: usize) -> Option<String> {
     debug!("nop_block_collapse {:?} {}", block_str, budget);
     block_str.map(|block_str| if block_str.starts_with('{') && budget >= 2 &&
-                                 (block_str[1..]
-                                      .find(|c: char| !c.is_whitespace())
-                                      .unwrap() ==
+                                 (block_str[1..].find(|c: char| !c.is_whitespace()).unwrap() ==
                                   block_str.len() - 2) {
                       "{}".to_owned()
                   } else {
@@ -678,8 +682,11 @@ impl Rewrite for ast::Block {
         };
 
         visitor.visit_block(self);
-
-        Some(format!("{}{}", prefix, visitor.buffer))
+        if visitor.failed {
+            None
+        } else {
+            Some(format!("{}{}", prefix, visitor.buffer))
+        }
     }
 }
 
@@ -933,16 +940,12 @@ impl<'a> Rewrite for ControlFlow<'a> {
 
         // for event in event
         let between_kwd_cond =
-            mk_sp(context
-                      .codemap
-                      .span_after(self.span, self.keyword.trim()),
+            mk_sp(context.codemap.span_after(self.span, self.keyword.trim()),
                   self.pat
                       .map_or(cond_span.lo, |p| if self.matcher.is_empty() {
                 p.span.lo
             } else {
-                context
-                    .codemap
-                    .span_before(self.span, self.matcher.trim())
+                context.codemap.span_before(self.span, self.matcher.trim())
             }));
 
         let between_kwd_cond_comment = extract_comment(between_kwd_cond, context, shape);
@@ -1137,10 +1140,7 @@ fn rewrite_match_arm_comment(context: &RewriteContext,
     let first = missed_str
         .find(|c: char| !c.is_whitespace())
         .unwrap_or(missed_str.len());
-    if missed_str[..first]
-           .chars()
-           .filter(|c| c == &'\n')
-           .count() >= 2 {
+    if missed_str[..first].chars().filter(|c| c == &'\n').count() >= 2 {
         // Excessive vertical whitespace before comment should be preserved
         // FIXME handle vertical whitespace better
         result.push('\n');
@@ -1350,11 +1350,10 @@ impl Rewrite for ast::Arm {
         // 4 = ` => `.len()
         if shape.width > pat_width + comma.len() + 4 {
             let arm_shape = shape
-                .shrink_left(pat_width + 4)
+                .offset_left(pat_width + 4)
                 .unwrap()
                 .sub_width(comma.len())
-                .unwrap()
-                .block();
+                .unwrap();
             let rewrite = nop_block_collapse(body.rewrite(context, arm_shape), arm_shape.width);
             let is_block = if let ast::ExprKind::Block(..) = body.node {
                 true
@@ -1363,7 +1362,9 @@ impl Rewrite for ast::Arm {
             };
 
             match rewrite {
-                Some(ref body_str) if !body_str.contains('\n') || !context.config.wrap_match_arms ||
+                Some(ref body_str) if (!body_str.contains('\n') &&
+                                       body_str.len() <= arm_shape.width) ||
+                                      !context.config.wrap_match_arms ||
                                       is_block => {
                     let block_sep = match context.config.control_brace_style {
                         ControlBraceStyle::AlwaysNextLine if is_block => alt_block_sep.as_str(),
@@ -2110,13 +2111,15 @@ pub fn rewrite_assign_rhs<S: Into<String>>(context: &RewriteContext,
             let new_offset = shape.indent.block_indent(context.config);
             let max_width = try_opt!((shape.width + shape.indent.width())
                                          .checked_sub(new_offset.width()));
-            let new_rhs = ex.rewrite(context, Shape::legacy(max_width, new_offset));
+            let new_shape = Shape::legacy(max_width, new_offset);
+            let new_rhs = ex.rewrite(context, new_shape);
 
             // FIXME: DRY!
             match (rhs, new_rhs) {
                 (Some(ref orig_rhs), Some(ref replacement_rhs))
-                    if count_line_breaks(orig_rhs) >
-                       count_line_breaks(replacement_rhs) + 1 => {
+                    if count_line_breaks(orig_rhs) > count_line_breaks(replacement_rhs) + 1 ||
+                       (orig_rhs.rewrite(context, shape).is_none() &&
+                        replacement_rhs.rewrite(context, new_shape).is_some()) => {
                     result.push_str(&format!("\n{}", new_offset.to_string(context.config)));
                     result.push_str(replacement_rhs);
                 }

@@ -146,12 +146,11 @@ pub fn rewrite_macro(mac: &ast::Mac,
         MacroStyle::Parens => {
             // Format macro invocation as function call, forcing no trailing
             // comma because not all macros support them.
-            rewrite_call(context, &macro_name, &expr_vec, mac.span, shape, true).map(|rw| {
-                match position {
-                    MacroPosition::Item => format!("{};", rw),
-                    _ => rw,
-                }
-            })
+            rewrite_call(context, &macro_name, &expr_vec, mac.span, shape, true)
+                .map(|rw| match position {
+                         MacroPosition::Item => format!("{};", rw),
+                         _ => rw,
+                     })
         }
         MacroStyle::Brackets => {
             // Format macro invocation as array literal.
@@ -196,15 +195,9 @@ pub fn convert_try_mac(mac: &ast::Mac, context: &RewriteContext) -> Option<ast::
 
 fn macro_style(mac: &ast::Mac, context: &RewriteContext) -> MacroStyle {
     let snippet = context.snippet(mac.span);
-    let paren_pos = snippet
-        .find_uncommented("(")
-        .unwrap_or(usize::max_value());
-    let bracket_pos = snippet
-        .find_uncommented("[")
-        .unwrap_or(usize::max_value());
-    let brace_pos = snippet
-        .find_uncommented("{")
-        .unwrap_or(usize::max_value());
+    let paren_pos = snippet.find_uncommented("(").unwrap_or(usize::max_value());
+    let bracket_pos = snippet.find_uncommented("[").unwrap_or(usize::max_value());
+    let brace_pos = snippet.find_uncommented("{").unwrap_or(usize::max_value());
 
     if paren_pos < bracket_pos && paren_pos < brace_pos {
         MacroStyle::Parens
